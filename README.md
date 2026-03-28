@@ -183,7 +183,7 @@ terraform destroy
 ## Service URLs
 
 - Dashboard: http://localhost:8080
-- PostgreSQL: localhost:5432 (user: admin, password: admin123)
+- PostgreSQL: localhost:5432 (user: admin, password: (your-password))
 - Redis: localhost:6379
 
 ## CI/CD Pipeline (GitHub Actions)

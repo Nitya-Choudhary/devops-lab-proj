@@ -28,6 +28,15 @@ else
     exit 1
 fi
 
+# Test Redis
+echo "Testing Redis..."
+if nc -z -w2 localhost 6379 2>/dev/null; then
+    echo "Redis is accessible"
+else
+    echo "Redis is not responding"
+    exit 1
+fi
+
 echo ""
 echo "========================================"
 echo "All services are running!"

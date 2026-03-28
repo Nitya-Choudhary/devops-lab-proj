@@ -107,7 +107,7 @@ You should see Docker version and no errors.
 
 ### Step 3: Start Services with Docker Compose
 
-This creates and starts the Nginx web server and PostgreSQL database containers.
+This creates and starts the Nginx web server, PostgreSQL database, and Redis cache containers.
 
 In PowerShell:
 
@@ -125,6 +125,7 @@ docker-compose up -d
 ```
 Creating iac-nginx   ... done
 Creating iac-postgres ... done
+Creating iac-redis   ... done
 ```
 
 Your containers are now running!
@@ -151,12 +152,14 @@ ansible-playbook -i ansible/inventory.ini ansible/site.yml
 **What happens:**
 - Checks if Nginx container is running
 - Checks if PostgreSQL container is running
+- Checks if Redis container is running
 - Prints status messages
 
 **Expected output:**
 ```
 Nginx container is running
 PostgreSQL container is running
+Redis container is running
 IaC Simulator infrastructure is ready! Access dashboard at http://localhost:8080
 ```
 
@@ -178,7 +181,7 @@ http://localhost:8080
 
 **You should see:**
 - Modern dark dashboard
-- 2 running services (Nginx, PostgreSQL)
+- 3 running services (Nginx, PostgreSQL, Redis)
 - Live uptime counters
 - CPU usage bars
 - Log stream
@@ -204,6 +207,7 @@ cd scripts
 **What happens:**
 - Tests Nginx (HTTP 200)
 - Tests PostgreSQL (port 5432)
+- Tests Redis (port 6379)
 
 **Expected output:**
 ```
@@ -212,6 +216,9 @@ Nginx is running (HTTP 200)
 
 Testing PostgreSQL...
 PostgreSQL is accessible
+
+Testing Redis...
+Redis is accessible
 
 All services are running!
 ```
@@ -232,6 +239,11 @@ curl http://localhost:8080
 **Check PostgreSQL:**
 ```powershell
 Test-NetConnection -ComputerName localhost -Port 5432
+```
+
+**Check Redis:**
+```powershell
+Test-NetConnection -ComputerName localhost -Port 6379
 ```
 
 **List Running Containers:**
@@ -410,6 +422,23 @@ psql -h localhost -U postgres -d iac_simulator
 # Password: example
 ```
 
+### Problem: Redis connection fails
+
+**Solution:**
+
+In PowerShell:
+
+```powershell
+# Check if redis is running
+docker-compose ps
+
+# View redis logs
+docker-compose logs redis
+
+# Try to connect
+redis-cli -h localhost
+```
+
 ### Problem: Cannot see dashboard updates
 
 **Solution:**
@@ -426,7 +455,7 @@ Here's what each file does:
 
 | File | Purpose |
 |------|---------|
-| `docker-compose.yml` | Defines Nginx and PostgreSQL containers |
+| `docker-compose.yml` | Defines Nginx, PostgreSQL, and Redis containers |
 | `ansible/inventory.ini` | Ansible hosts configuration |
 | `ansible/site.yml` | Playbook to verify services |
 | `frontend/index.html` | Dashboard (opens at localhost:8080) |
@@ -441,13 +470,14 @@ After completing all steps, you'll have:
 ```
 Running Containers:
 ├── iac-nginx (Port 8080) - Web server
-└── iac-postgres (Port 5432) - Database
+├── iac-postgres (Port 5432) - Database
+└── iac-redis (Port 6379) - Cache
 
 Dashboard:
 └── http://localhost:8080 - Live monitoring
 
 Data:
-└── PostgreSQL database with persistent storage
+└── PostgreSQL database & Redis cache with persistent storage
 ```
 
 ---
@@ -476,6 +506,7 @@ After setup:
 - Run tests with .\smoke-test.sh
 - Check logs with `docker-compose logs`
 - Connect to PostgreSQL: `psql -h localhost -U postgres -d iac_simulator`
+- Connect to Redis: `redis-cli -h localhost`
 - Modify docker-compose.yml to add more services
 - Share setup with teammates using this guide!
 

@@ -1,7 +1,7 @@
 version: '3.8'
 
 # IaC Simulator - Docker Compose Configuration
-# Simple infrastructure setup with Nginx web server and PostgreSQL database
+# Simple infrastructure setup with Nginx web server, PostgreSQL database, and Redis cache
 
 services:
   # Web server - serves static dashboard
@@ -38,6 +38,20 @@ services:
       - iac-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Cache server - Redis
+  redis:
+    image: redis:7-alpine
+    container_name: iac-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - iac-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -4,7 +4,7 @@ A simple Infrastructure as Code project demonstrating Docker Compose, Ansible, a
 
 ## What This Project Does
 
-- **Docker Compose**: Provisions containers (Nginx web server + PostgreSQL database)
+- **Docker Compose**: Provisions containers (Nginx web server + PostgreSQL database + Redis cache)
 - **Ansible**: Verifies services are running and healthy
 - **Frontend**: Interactive dashboard with real-time updates on localhost:8080
 
@@ -53,6 +53,9 @@ curl http://localhost:8080
 psql -h localhost -U postgres -d iac_simulator
 # Password: example
 
+# Test Redis connection
+redis-cli -h localhost
+
 # Run automated tests
 ./scripts/smoke-test.sh
 ```
@@ -63,12 +66,13 @@ psql -h localhost -U postgres -d iac_simulator
 - Ansible (Configuration management & verification)
 - Nginx (Web server)
 - PostgreSQL (Database)
+- Redis (Caching layer)
 
 ## Project Structure
 
 ```
 iac-simulator/
-├── docker-compose.yml      # Service definitions
+├── docker-compose.yml      # Service definitions (Nginx, PostgreSQL, Redis)
 ├── ansible/
 │   ├── inventory.ini       # Ansible hosts
 │   └── site.yml            # Service verification playbook
@@ -84,7 +88,7 @@ iac-simulator/
 
 Access the interactive dashboard at http://localhost:8080:
 
-- Real-time service status
+- Real-time service status (3 services: Web, Database, Cache)
 - Container health checks
 - Live uptime counters
 - System metrics display
@@ -94,10 +98,11 @@ Access the interactive dashboard at http://localhost:8080:
 
 By exploring this project, you'll understand:
 
-1. **Docker Compose**: How to define multi-container applications
+1. **Docker Compose**: How to define multi-container applications (3 services)
 2. **Ansible**: How to automate verification and configuration
 3. **DevOps Basics**: Infrastructure automation and monitoring
-4. **Local Development**: Running full stacks locally
+4. **Caching Concepts**: Understanding Redis in a stack
+5. **Local Development**: Running full production-like stacks locally
 
 ## Troubleshooting
 

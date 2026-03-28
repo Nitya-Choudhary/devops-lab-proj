@@ -1,0 +1,19 @@
+# Ansible Lint Configuration
+
+# Extend default rules
+extend_default_settings: true
+
+# Skip certain rules that are less critical for this project
+skip_list:
+  - 301  # skipping to allow shell module (needed for docker ps)
+
+# Verbosity level
+verbosity: 1
+
+# Paths to lint
+exclude_paths:
+  - .github/
+  - .gitignore
+
+# Allow warnings
+warn_list: []

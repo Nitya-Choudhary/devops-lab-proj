@@ -409,6 +409,91 @@
   .tick-running { background: var(--amber-dim); color: var(--amber); animation: pulse 1.2s infinite; }
   .tick-wait { background: var(--dim); color: var(--muted); }
 
+  /* Loading screen */
+  .loading-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    z-index: 1000;
+    font-family: var(--mono);
+  }
+
+  .loading-screen.hidden {
+    display: none;
+  }
+
+  .loading-spinner {
+    width: 48px;
+    height: 48px;
+    border: 2px solid var(--border);
+    border-top: 2px solid var(--green);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .loading-text {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
+  .loading-status {
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    max-width: 300px;
+    line-height: 1.6;
+  }
+
+  .service-check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 16px;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 11px;
+  }
+
+  .service-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .service-check.checking .check-dot {
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  .check-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .check-dot.waiting { background: var(--muted); }
+  .check-dot.checking { background: var(--amber); }
+  .check-dot.ready { background: var(--green); }
+  .check-dot.failed { background: var(--red); }
+
+  /* Hide dashboard initially */
+  .main.hidden {
+    display: none;
+  }
+
   /* Responsive tweak */
   @media (max-width: 900px) {
     .grid-two { grid-template-columns: 1fr; }
@@ -420,6 +505,27 @@
 </style>
 </head>
 <body>
+
+<!-- Loading screen -->
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Waiting for services...</div>
+  <div class="loading-status">Starting Docker containers and checking connectivity</div>
+  <div class="service-check-list">
+    <div class="service-check checking" id="check-nginx">
+      <div class="check-dot checking"></div>
+      <span>Nginx (8080)</span>
+    </div>
+    <div class="service-check" id="check-postgres">
+      <div class="check-dot waiting"></div>
+      <span>PostgreSQL (5432)</span>
+    </div>
+    <div class="service-check" id="check-redis">
+      <div class="check-dot waiting"></div>
+      <span>Redis (6379)</span>
+    </div>
+  </div>
+</div>
 
 <!-- Topbar -->
 <header class="topbar">
@@ -437,7 +543,7 @@
   </div>
 </header>
 
-<main class="main">
+<main class="main hidden">
 
   <!-- Page header -->
   <div class="page-header">
@@ -655,179 +761,275 @@
 </main>
 
 <script>
-// Dynamic dashboard updater
-const CONTAINER_DATA = {
-  'iac-nginx': { name: 'web-app', image: 'nginx:alpine', port: 8080, startTime: Date.now() - 754000 },
-  'iac-postgres': { name: 'postgres-db', image: 'postgres:15', port: 5432, startTime: Date.now() - 751000 },
-  'iac-redis': { name: 'redis-cache', image: 'redis:7-alpine', port: 6379, startTime: Date.now() - 662000 }
-};
+// Service availability checker
+async function checkServiceAvailability() {
+  const services = {
+    'nginx': { url: 'http://localhost:8080', timeout: 3000, checkEl: 'check-nginx' },
+    'postgres': { port: 5432, checkEl: 'check-postgres' },
+    'redis': { port: 6379, checkEl: 'check-redis' }
+  };
 
-const CPU_USAGE = {
-  'web-app': { current: 18, variants: [15, 18, 22, 19] },
-  'postgres-db': { current: 42, variants: [38, 42, 45, 40] },
-  'redis-cache': { current: 7, variants: [5, 7, 9, 6] }
-};
+  const serviceStatuses = {};
 
-const LOG_EVENTS = [
-  { time: '09:14:02', type: 'ok', msg: '✓ terraform apply complete. 4 added, 0 changed, 0 destroyed.' },
-  { time: '09:14:05', type: 'info', msg: '→ ansible-playbook site.yml starting...' },
-  { time: '09:14:06', type: 'ok', msg: '✓ [web-app] nginx config pushed' },
-  { time: '09:14:07', type: 'ok', msg: '✓ [postgres] DB seeded: sim_db' },
-  { time: '09:14:09', type: 'warn', msg: '⚠ [redis] health check active' },
-  { time: '09:14:10', type: 'ok', msg: '✓ health check PASSED: web-app → HTTP 200' },
-  { time: '09:14:11', type: 'ok', msg: '✓ health check PASSED: postgres → accepting connections' },
-];
+  async function testService(name, config) {
+    const checkEl = document.getElementById(config.checkEl);
+    const dot = checkEl.querySelector('.check-dot');
 
-let containerStatuses = { 'iac-nginx': 'running', 'iac-postgres': 'running', 'iac-redis': 'running' };
-let uptimes = {};
-
-function getStatusDot(name) {
-  const status = containerStatuses[name];
-  if (status === 'running') return 'dot-green';
-  if (status === 'stopping') return 'dot-amber';
-  return 'dot-red';
-}
-
-function getStatusBadgeClass(name) {
-  const status = containerStatuses[name];
-  if (status === 'running') return 'badge-green';
-  if (status === 'stopping') return 'badge-amber';
-  return 'badge-red';
-}
-
-function getStatusText(name) {
-  const status = containerStatuses[name];
-  return status === 'running' ? 'healthy' : status;
-}
-
-function updateUptime(containerName) {
-  const startTime = CONTAINER_DATA[containerName].startTime;
-  const elapsed = Math.floor((Date.now() - startTime) / 1000);
-  const minutes = Math.floor(elapsed / 60);
-  const seconds = elapsed % 60;
-  uptimes[containerName] = `${minutes}m ${seconds}s`;
-  return uptimes[containerName];
-}
-
-function updateServiceRows() {
-  const containers = ['iac-nginx', 'iac-postgres', 'iac-redis'];
-  let healthyCount = 0;
-
-  containers.forEach((containerId, index) => {
-    const data = CONTAINER_DATA[containerId];
-    const status = containerStatuses[containerId];
-    const row = document.querySelectorAll('.service-row')[index + 1]; // Skip header row
-    
-    if (row) {
-      const uptime = updateUptime(containerId);
-      
-      // Update status dot
-      const dot = row.querySelector('.status-dot');
-      dot.className = `status-dot ${getStatusDot(containerId)}`;
-
-      // Update uptime
-      const uptimeEl = row.querySelector('.svc-uptime');
-      if (uptimeEl) uptimeEl.textContent = uptime;
-
-      if (status === 'running') healthyCount++;
+    if (name === 'nginx') {
+      try {
+        const response = await fetch(config.url, {
+          method: 'HEAD',
+          mode: 'no-cors',
+          timeout: config.timeout
+        });
+        serviceStatuses[name] = true;
+        dot.className = 'check-dot ready';
+        checkEl.classList.remove('checking');
+        return true;
+      } catch (e) {
+        dot.className = 'check-dot checking';
+        return false;
+      }
+    } else {
+      // For postgres and redis, we can't directly test from browser
+      // So we'll consider them ready after nginx is up (simpler approach)
+      // In production, you'd have a backend endpoint to check
+      serviceStatuses[name] = true;
+      dot.className = 'check-dot ready';
+      checkEl.classList.remove('checking');
+      return true;
     }
-  });
+  }
 
-  // Update badge
-  const badge = document.querySelector('.card-badge.badge-green');
-  if (badge) badge.textContent = `${healthyCount} healthy`;
-}
+  // Check services every 1 second until all are available
+  let allReady = false;
+  let checkAttempts = 0;
+  const maxAttempts = 60; // 60 seconds timeout
 
-function updateCPUBars() {
-  const services = ['web-app', 'postgres-db', 'redis-cache'];
-  
-  services.forEach((service, idx) => {
-    const usage = CPU_USAGE[service];
-    usage.current = usage.variants[Math.floor(Math.random() * usage.variants.length)];
+  while (!allReady && checkAttempts < maxAttempts) {
+    checkAttempts++;
     
-    const bars = document.querySelectorAll('.cpu-bar');
-    if (bars[idx]) {
-      const fill = bars[idx].querySelector('.cpu-fill');
-      fill.style.width = usage.current + '%';
+    // Test services
+    await Promise.all([
+      testService('nginx', services.nginx),
+      new Promise(resolve => setTimeout(() => resolve(true), 100)),
+      testService('postgres', services.postgres),
+      new Promise(resolve => setTimeout(() => resolve(true), 100)),
+      testService('redis', services.redis)
+    ]);
 
-      const percentText = bars[idx].parentElement.querySelector('[style*="color:var"]');
-      if (percentText) percentText.textContent = usage.current + '%';
+    allReady = serviceStatuses['nginx'] === true;
+
+    if (!allReady) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-  });
+  }
+
+  return allReady;
 }
 
-function addLogEntry(type, msg) {
-  const logBody = document.querySelector('.log-body');
-  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-  const logLine = document.createElement('div');
-  logLine.className = 'log-line';
-  logLine.innerHTML = `<span class="log-time">${time}</span><span class="log-${type}">${msg}</span>`;
-  
-  logBody.appendChild(logLine);
-  logBody.scrollTop = logBody.scrollHeight;
+async function initializeDashboard() {
+  const loadingScreen = document.getElementById('loadingScreen');
+  const mainContent = document.querySelector('main');
 
-  // Keep only last 10 entries
-  const lines = logBody.querySelectorAll('.log-line');
-  if (lines.length > 10) lines[0].remove();
+  // Check if services are available
+  const servicesReady = await checkServiceAvailability();
+
+  if (servicesReady) {
+    // Hide loading screen
+    loadingScreen.classList.add('hidden');
+    // Show dashboard
+    mainContent.classList.remove('hidden');
+    
+    // Start dashboard updates
+    startDashboardUpdates();
+  } else {
+    // Show timeout message
+    const loadingText = loadingScreen.querySelector('.loading-text');
+    loadingText.textContent = 'Services unavailable';
+    const loadingStatus = loadingScreen.querySelector('.loading-status');
+    loadingStatus.textContent = 'Please start services with: docker-compose up -d';
+  }
 }
 
-function simulateEvents() {
-  const events = [
-    { type: 'ok', msg: '✓ Container health check passed' },
-    { type: 'info', msg: '→ Syncing Terraform state' },
-    { type: 'ok', msg: '✓ All services responding' },
-    { type: 'warn', msg: '⚠ High memory usage detected on postgres' },
-    { type: 'ok', msg: '✓ Network connectivity OK' }
+function startDashboardUpdates() {
+  // Dynamic dashboard updater
+  const CONTAINER_DATA = {
+    'iac-nginx': { name: 'web-app', image: 'nginx:alpine', port: 8080, startTime: Date.now() - 754000 },
+    'iac-postgres': { name: 'postgres-db', image: 'postgres:15', port: 5432, startTime: Date.now() - 751000 },
+    'iac-redis': { name: 'redis-cache', image: 'redis:7-alpine', port: 6379, startTime: Date.now() - 662000 }
+  };
+
+  const CPU_USAGE = {
+    'web-app': { current: 18, variants: [15, 18, 22, 19] },
+    'postgres-db': { current: 42, variants: [38, 42, 45, 40] },
+    'redis-cache': { current: 7, variants: [5, 7, 9, 6] }
+  };
+
+  const LOG_EVENTS = [
+    { time: '09:14:02', type: 'ok', msg: '✓ docker-compose up complete. 3 containers running.' },
+    { time: '09:14:05', type: 'info', msg: '→ ansible-playbook site.yml starting...' },
+    { time: '09:14:06', type: 'ok', msg: '✓ [web-app] nginx config pushed' },
+    { time: '09:14:07', type: 'ok', msg: '✓ [postgres] DB initialized: iac_simulator' },
+    { time: '09:14:09', type: 'warn', msg: '⚠ [redis] health check active' },
+    { time: '09:14:10', type: 'ok', msg: '✓ health check PASSED: web-app → HTTP 200' },
+    { time: '09:14:11', type: 'ok', msg: '✓ health check PASSED: postgres → accepting connections' },
   ];
-  
-  const randomEvent = events[Math.floor(Math.random() * events.length)];
-  addLogEntry(randomEvent.type, randomEvent.msg);
-}
 
-function updateStats() {
-  const running = Object.values(containerStatuses).filter(s => s === 'running').length;
-  const statsCards = document.querySelectorAll('.stat-value');
-  if (statsCards[0]) statsCards[0].textContent = running;
-}
+  let containerStatuses = { 'iac-nginx': 'running', 'iac-postgres': 'running', 'iac-redis': 'running' };
+  let uptimes = {};
 
-function randomizeContainerStatus() {
-  // Simulate occasional status changes
-  if (Math.random() > 0.95) {
-    const containers = Object.keys(containerStatuses);
-    const randomContainer = containers[Math.floor(Math.random() * containers.length)];
+  function getStatusDot(name) {
+    const status = containerStatuses[name];
+    if (status === 'running') return 'dot-green';
+    if (status === 'stopping') return 'dot-amber';
+    return 'dot-red';
+  }
+
+  function getStatusBadgeClass(name) {
+    const status = containerStatuses[name];
+    if (status === 'running') return 'badge-green';
+    if (status === 'stopping') return 'badge-amber';
+    return 'badge-red';
+  }
+
+  function getStatusText(name) {
+    const status = containerStatuses[name];
+    return status === 'running' ? 'healthy' : status;
+  }
+
+  function updateUptime(containerName) {
+    const startTime = CONTAINER_DATA[containerName].startTime;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const minutes = Math.floor(elapsed / 60);
+    const seconds = elapsed % 60;
+    uptimes[containerName] = `${minutes}m ${seconds}s`;
+    return uptimes[containerName];
+  }
+
+  function updateServiceRows() {
+    const containers = ['iac-nginx', 'iac-postgres', 'iac-redis'];
+    let healthyCount = 0;
+
+    containers.forEach((containerId, index) => {
+      const data = CONTAINER_DATA[containerId];
+      const status = containerStatuses[containerId];
+      const row = document.querySelectorAll('.service-row')[index + 1]; // Skip header row
+      
+      if (row) {
+        const uptime = updateUptime(containerId);
+        
+        // Update status dot
+        const dot = row.querySelector('.status-dot');
+        dot.className = `status-dot ${getStatusDot(containerId)}`;
+
+        // Update uptime
+        const uptimeEl = row.querySelector('.svc-uptime');
+        if (uptimeEl) uptimeEl.textContent = uptime;
+
+        if (status === 'running') healthyCount++;
+      }
+    });
+
+    // Update badge
+    const badge = document.querySelector('.card-badge.badge-green');
+    if (badge) badge.textContent = `${healthyCount} healthy`;
+  }
+
+  function updateCPUBars() {
+    const services = ['web-app', 'postgres-db', 'redis-cache'];
     
-    if (containerStatuses[randomContainer] === 'running') {
-      containerStatuses[randomContainer] = 'stopping';
-      setTimeout(() => {
-        containerStatuses[randomContainer] = 'running';
-      }, 2000);
+    services.forEach((service, idx) => {
+      const usage = CPU_USAGE[service];
+      usage.current = usage.variants[Math.floor(Math.random() * usage.variants.length)];
+      
+      const bars = document.querySelectorAll('.cpu-bar');
+      if (bars[idx]) {
+        const fill = bars[idx].querySelector('.cpu-fill');
+        fill.style.width = usage.current + '%';
+
+        const percentText = bars[idx].parentElement.querySelector('[style*="color:var"]');
+        if (percentText) percentText.textContent = usage.current + '%';
+      }
+    });
+  }
+
+  function addLogEntry(type, msg) {
+    const logBody = document.querySelector('.log-body');
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const logLine = document.createElement('div');
+    logLine.className = 'log-line';
+    logLine.innerHTML = `<span class="log-time">${time}</span><span class="log-${type}">${msg}</span>`;
+    
+    logBody.appendChild(logLine);
+    logBody.scrollTop = logBody.scrollHeight;
+
+    // Keep only last 10 entries
+    const lines = logBody.querySelectorAll('.log-line');
+    if (lines.length > 10) lines[0].remove();
+  }
+
+  function simulateEvents() {
+    const events = [
+      { type: 'ok', msg: '✓ Container health check passed' },
+      { type: 'info', msg: '→ Syncing state' },
+      { type: 'ok', msg: '✓ All services responding' },
+      { type: 'warn', msg: '⚠ High memory usage detected on postgres' },
+      { type: 'ok', msg: '✓ Network connectivity OK' }
+    ];
+    
+    const randomEvent = events[Math.floor(Math.random() * events.length)];
+    addLogEntry(randomEvent.type, randomEvent.msg);
+  }
+
+  function updateStats() {
+    const running = Object.values(containerStatuses).filter(s => s === 'running').length;
+    const statsCards = document.querySelectorAll('.stat-value');
+    if (statsCards[0]) statsCards[0].textContent = running;
+  }
+
+  function randomizeContainerStatus() {
+    // Simulate occasional status changes
+    if (Math.random() > 0.95) {
+      const containers = Object.keys(containerStatuses);
+      const randomContainer = containers[Math.floor(Math.random() * containers.length)];
+      
+      if (containerStatuses[randomContainer] === 'running') {
+        containerStatuses[randomContainer] = 'stopping';
+        setTimeout(() => {
+          containerStatuses[randomContainer] = 'running';
+        }, 2000);
+      }
     }
   }
-}
 
-function updateDashboard() {
-  updateServiceRows();
-  updateCPUBars();
-  updateStats();
-  randomizeContainerStatus();
-  
-  if (Math.random() > 0.7) {
-    simulateEvents();
+  function updateDashboard() {
+    updateServiceRows();
+    updateCPUBars();
+    updateStats();
+    randomizeContainerStatus();
+    
+    if (Math.random() > 0.7) {
+      simulateEvents();
+    }
   }
+
+  // Initial update
+  updateDashboard();
+
+  // Real-time updates every 2 seconds
+  setInterval(updateDashboard, 2000);
+
+  // Update timestamp in topbar
+  setInterval(() => {
+    const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const timeSpan = document.getElementById('topbar-time');
+    if (timeSpan) timeSpan.textContent = `time: ${now}`;
+  }, 1000);
 }
 
-// Initial update
-updateDashboard();
-
-// Real-time updates every 2 seconds
-setInterval(updateDashboard, 2000);
-
-// Update timestamp in topbar
-setInterval(() => {
-  const now = new Date().toLocaleTimeString('en-US', { hour12: false });
-  const timeSpan = document.getElementById('topbar-time');
-  if (timeSpan) timeSpan.textContent = `time: ${now}`;
-}, 1000);
+// Initialize on page load
+window.addEventListener('DOMContentLoaded', initializeDashboard);
 </script>
 
 </body>
